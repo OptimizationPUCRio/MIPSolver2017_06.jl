@@ -13,6 +13,7 @@ module SolverBrendon
       xub
       l
       u
+      vtypes
       solver
   end
 
@@ -39,7 +40,8 @@ module SolverBrendon
     l,u = JuMP.prepConstrBounds(m)
     c = JuMP.prepAffObjective(m)
     solver = m.solver
-    problem = prob_lp(A,c,n,mm,xlb,xub,l,u,solver)
+    vtypes = copy(m.colCat)
+    problem = prob_lp(A,c,n,mm,xlb,xub,l,u,vtypes,solver)
 
 
     return problem
@@ -84,6 +86,17 @@ module SolverBrendon
 
   function SolveMIP(m)
 
+    sol = GurobiSolver()
+    xlb = [1,0,1]
+    xup = [3,1,+Inf]
+
+    m = Model(solver = sol)
+    @variable(m, xlb[i] <= x[i=1:3] <= xup[i], Int)
+    @constraint(m, 5*x[1] - 2*x[2] + 8*x[3]<= 15)
+    @constraint(m, 8*x[1] + 3*x[2] - x[3] >= 9)
+    @constraint(m,x[1] + x[2] + x[3] <= 6)
+    @objective(m,Max, 2x[1] + x[2] - x[3])
+
     # Inicia o Clock###############################################
     tic()
     # Criacao da lista: ###########################################
@@ -96,6 +109,17 @@ module SolverBrendon
     zinf.resp = solve_relax(zinf.problem)
     global_bound = [zinf.resp.obj,+Inf]
     push!(lista,zinf)
+
+    #vetor vtype###################################################
+
+    v_bin=transpose(zeros(1,size(zinf.problem.vtypes)[1]))
+
+    for i= 1:size(v_bin)[1]
+      if(zinf.problem.vtypes[i]==:Int||zinf.problem.vtypes[i]==:Bin)
+        v_bin[i]=1
+      end
+    end
+
     ############################### ###############################
     iter = 0
     while (abs(global_bound[2] - global_bound[1]) >= 0.00000005 && size(lista)[1] != 0)
@@ -106,7 +130,7 @@ module SolverBrendon
         ############################### ###############################
 
         #Select variables #############################################
-        ind = indmax(abs.(lista[ind_prob].resp.vars - round.(lista[ind_prob].resp.vars)))
+        ind = indmax(abs.(lista[ind_prob].resp.vars.*v_bin - round.(lista[ind_prob].resp.vars.*v_bin)))
         ############################### ###############################
 
         #Branch #######################################################
