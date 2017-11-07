@@ -31,8 +31,13 @@ module SolverBrendon
 
 
 
-  function converte_modelo(m::Model)
+  function converte_modelo(mw::Model)
 
+    m = deepcopy(mw)
+
+    if m.objSense == :Max
+        @objective(m,:Min,-m.obj)
+    end
     A = JuMP.prepConstrMatrix(m)
     n, mm= size(A)
     xlb = copy(m.colLower)
@@ -66,7 +71,7 @@ module SolverBrendon
     return resp
   end
 
-  function podas(resp ::resposta_relaxado, global_bound )
+  function podas(resp ::resposta_relaxado, global_bound, v_bin )
 
     #Poda por Inviabilidade###########################
     if(resp.status != :Optimal)
@@ -77,25 +82,28 @@ module SolverBrendon
       return "erro"
     end
     #Poda por Otimalidade###############################################
-    if ( sum(abs.(resp.vars - round.(resp.vars))) == 0 )
+    if ( sum(abs.(resp.vars - round.(resp.vars)).*v_bin) == 0 )
       return Float64(resp.obj)
     end
     return "sucesso"
   end
 
+  function exp_mod(m,zinf,nos_explorados,int_sol,time,global_bound)
+
+    m.objVal = zinf.resp.obj
+    m.colVal = zinf.resp.vars
+    m.objBound =  global_bound
+
+
+    m.ext[:nos] = nos_explorados
+    m.ext[:solucao_inteira] = int_sol
+    m.ext[:status] = zinf.resp.status
+    m.ext[:time] = time
+
+    return m
+  end
 
   function SolveMIP(m)
-
-    sol = GurobiSolver()
-    xlb = [1,0,1]
-    xup = [3,1,+Inf]
-
-    m = Model(solver = sol)
-    @variable(m, xlb[i] <= x[i=1:3] <= xup[i], Int)
-    @constraint(m, 5*x[1] - 2*x[2] + 8*x[3]<= 15)
-    @constraint(m, 8*x[1] + 3*x[2] - x[3] >= 9)
-    @constraint(m,x[1] + x[2] + x[3] <= 6)
-    @objective(m,Max, 2x[1] + x[2] - x[3])
 
     # Inicia o Clock###############################################
     tic()
@@ -111,137 +119,137 @@ module SolverBrendon
     push!(lista,zinf)
 
     #vetor vtype###################################################
+    v_bin=zeros(size(zinf.problem.vtypes)[1])
 
-    v_bin=transpose(zeros(1,size(zinf.problem.vtypes)[1]))
-
-    for i= 1:size(v_bin)[1]
-      if(zinf.problem.vtypes[i]==:Int||zinf.problem.vtypes[i]==:Bin)
+    for i = 1: size(v_bin)[1]
+      if((zinf.problem.vtypes[i]==:Int)|(zinf.problem.vtypes[i]==:Bin))
         v_bin[i]=1
       end
     end
 
-    ############################### ###############################
-    iter = 0
-    while (abs(global_bound[2] - global_bound[1]) >= 0.00000005 && size(lista)[1] != 0)
-        #Seleciona problema  ##########################################
-        # ind_prob = #ind do problema selecionado
-        ind_prob = 1
 
-        ############################### ###############################
+    if(sum(v_bin)!=0)
+      ############################### ###############################
+      iter = 0
+      while (abs(global_bound[2] - global_bound[1]) >= 0.00000005 && size(lista)[1] != 0)
+          #Seleciona problema  ##########################################
+          # ind_prob = #ind do problema selecionado
+          ind_prob = 1
 
-        #Select variables #############################################
-        ind = indmax(abs.(lista[ind_prob].resp.vars.*v_bin - round.(lista[ind_prob].resp.vars.*v_bin)))
-        ############################### ###############################
+          ############################### ###############################
 
-        #Branch #######################################################
-        prob_lb = deepcopy(lista[ind_prob].problem)
-        prob_lb.xlb[ind] = floor(lista[ind_prob].resp.vars[ind]) + 1
+          #Select variables #############################################
 
-        prob_ub = deepcopy(lista[ind_prob].problem)
-        prob_ub.xub[ind] = floor(lista[ind_prob].resp.vars[ind])
-        ############################### ###############################
 
-        #Solve das folhas #############################################
-        resp_lb = solve_relax(prob_lb)
-        resp_ub = solve_relax(prob_ub)
-        ############################### ###############################
+          ind = indmax(abs.(lista[ind_prob].resp.vars.*v_bin - round.(lista[ind_prob].resp.vars.*v_bin)))
+          ############################### ###############################
 
-        #Podas ########################################################
-        poda_lb = podas(resp_lb, global_bound)
-        poda_ub = podas(resp_ub, global_bound)
-        ############################### ###############################
+          #Branch #######################################################
+          prob_lb = deepcopy(lista[ind_prob].problem)
+          prob_lb.xlb[ind] = floor(lista[ind_prob].resp.vars[ind]) + 1
 
-        #Monta problema  ##############################################
-        novo_lb = 0
-        if typeof(poda_lb) == Float64
-            global_bound[2] = poda_lb
-            novo_lb = modelo_lista()
-            novo_lb.problem = prob_lb
-            novo_lb.resp = resp_lb
-            push!(int_sol,novo_lb)
-        elseif poda_lb == "sucesso"
-            novo_lb = modelo_lista()
-            novo_lb.problem = prob_lb
-            novo_lb.resp = resp_lb
-        end
+          prob_ub = deepcopy(lista[ind_prob].problem)
+          prob_ub.xub[ind] = floor(lista[ind_prob].resp.vars[ind])
+          ############################### ###############################
 
-        novo_ub = 0
-        if (typeof(poda_ub) == Float64)
-            if (typeof(poda_lb) == Float64)
-                if (poda_ub < poda_lb)
+          #Solve das folhas #############################################
+          resp_lb = solve_relax(prob_lb)
+          resp_ub = solve_relax(prob_ub)
+          ############################### ###############################
+
+          #Podas ########################################################
+          poda_lb = podas(resp_lb, global_bound,v_bin)
+          poda_ub = podas(resp_ub, global_bound,v_bin)
+          ############################### ###############################
+
+          #Monta problema  ##############################################
+          novo_lb = 0
+          if typeof(poda_lb) == Float64
+              global_bound[2] = poda_lb
+              novo_lb = modelo_lista()
+              novo_lb.problem = prob_lb
+              novo_lb.resp = resp_lb
+              push!(int_sol,novo_lb)
+          elseif poda_lb == "sucesso"
+              novo_lb = modelo_lista()
+              novo_lb.problem = prob_lb
+              novo_lb.resp = resp_lb
+          end
+
+          novo_ub = 0
+          if (typeof(poda_ub) == Float64)
+              if (typeof(poda_lb) == Float64)
+                  if (poda_ub < poda_lb)
+                      global_bound[2] = poda_ub
+                      novo_ub = modelo_lista()
+                      novo_ub.problem = prob_ub
+                      novo_ub.resp = resp_ub
+                      push!(int_sol,novo_ub)
+                  else
                     global_bound[2] = poda_ub
                     novo_ub = modelo_lista()
                     novo_ub.problem = prob_ub
                     novo_ub.resp = resp_ub
                     push!(int_sol,novo_ub)
                 end
-            else
-                global_bound[2] = poda_ub
-                novo_ub = modelo_lista()
-                novo_ub.problem = prob_ub
-                novo_ub.resp = resp_ub
-                push!(int_sol,novo_ub)
-            end
-        elseif poda_ub == "sucesso"
-            novo_ub = modelo_lista()
-            novo_ub.problem = prob_ub
-            novo_ub.resp = resp_ub
-        end
-        ############################### ###############################
 
-        #Atualiza Zinf ################################################
-        if typeof(poda_lb) == Float64
-            if novo_lb.resp.obj <= global_bound[2]
-                zinf = deepcopy(novo_lb)
-            end
-        end
-        if typeof(poda_ub) == Float64
-            if typeof(poda_lb) == Float64
-                if novo_ub.resp.obj <= global_bound[2] && novo_ub.resp.obj <= novo_lb.resp.obj
-                    zinf = deepcopy(novo_ub)
-                end
-            else
-                if novo_ub.resp.obj <= global_bound[2]
-                    zinf = deepcopy(novo_ub)
-                end
-            end
-        end
-        ############################### ###############################
+              else
+                  global_bound[2] = poda_ub
+                  novo_ub = modelo_lista()
+                  novo_ub.problem = prob_ub
+                  novo_ub.resp = resp_ub
+                  push!(int_sol,novo_ub)
+              end
+          elseif poda_ub == "sucesso"
+              novo_ub = modelo_lista()
+              novo_ub.problem = prob_ub
+              novo_ub.resp = resp_ub
+          end
+          ############################### ###############################
 
-        #Remove o problema original e adiciona os novos ###############
-        #Remove
+          #Atualiza Zinf ################################################
+          if typeof(poda_lb) == Float64
+              if novo_lb.resp.obj <= global_bound[2]
+                  zinf = deepcopy(novo_lb)
+              end
+          end
+          if typeof(poda_ub) == Float64
+              if typeof(poda_lb) == Float64
+                  if novo_ub.resp.obj <= global_bound[2] && novo_ub.resp.obj <= novo_lb.resp.obj
+                      zinf = deepcopy(novo_ub)
+                  end
+              else
+                  if novo_ub.resp.obj <= global_bound[2]
+                      zinf = deepcopy(novo_ub)
+                  end
+              end
+          end
+          ############################### ###############################
 
-        push!(nos_explorados, lista[ind_prob])
-        deleteat!(lista,ind_prob)
+          #Remove o problema original e adiciona os novos ###############
+          #Remove
 
-        #adiciona
-        if poda_lb == "sucesso"
-            push!(lista,novo_lb)
-        end
-        if poda_ub == "sucesso"
-            push!(lista,novo_ub)
-        end
-        iter += 1
+          push!(nos_explorados, lista[ind_prob])
+          deleteat!(lista,ind_prob)
+
+          #adiciona
+          if poda_lb == "sucesso"
+              push!(lista,novo_lb)
+          end
+          if poda_ub == "sucesso"
+              push!(lista,novo_ub)
+          end
+          iter += 1
+      end
     end
     if m.objSense == :Max
         zinf.resp.obj = - zinf.resp.obj
     end
-    if abs(global_bound[2] - global_bound[1]) <= 0.00000005
-        status = "Parada por Gap"
-    else
-        status = "Parada por impedimento de enumeracao da lista"
-    end
 
     time = toc()
 
-    m.objVal = zinf.resp.obj
-    m.ext[:status] = zinf.resp.status
-    m.ext[:time] = time
-    m.colVal = zinf.resp.vars
-    m.objBound =  global_bound
-    m.ext[:nos] = nos_explorados
-    m.ext[:solucao_inteira] = int_sol
+    model = exp_mod(m,zinf,nos_explorados,int_sol,time,global_bound)
 
-    return m
+    return model
   end
 end
