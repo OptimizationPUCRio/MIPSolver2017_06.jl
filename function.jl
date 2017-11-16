@@ -95,8 +95,8 @@ module SolverBrendon
     m.objBound =  global_bound[1]
 
 
-    m.ext[:node] = size(nos_explorados)
-    m.ext[:solucao_inteira] = size(int_sol)
+    m.ext[:node] = size(nos_explorados)[1]
+    m.ext[:solucao_inteira] = size(int_sol)[1]
     m.ext[:status] = zinf.resp.status
     m.ext[:time] = time
 
