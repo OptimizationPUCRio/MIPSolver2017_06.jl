@@ -92,11 +92,11 @@ module SolverBrendon
 
     m.objVal = zinf.resp.obj
     m.colVal = zinf.resp.vars
-    m.objBound =  global_bound
+    m.objBound =  global_bound[1]
 
 
-    m.ext[:nos] = nos_explorados
-    m.ext[:solucao_inteira] = int_sol
+    m.ext[:node] = size(nos_explorados)
+    m.ext[:solucao_inteira] = size(int_sol)
     m.ext[:status] = zinf.resp.status
     m.ext[:time] = time
 
