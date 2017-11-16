@@ -127,11 +127,12 @@ module SolverBrendon
       end
     end
 
-
+    jg_time0 = time_ns()
+  
     if(sum(v_bin)!=0)
       ############################### ###############################
       iter = 0
-      while (abs(global_bound[2] - global_bound[1]) >= 0.00000005 && size(lista)[1] != 0)
+      while (abs(global_bound[2] - global_bound[1]) >= 0.00000005 && size(lista)[1] != 0 && (time_ns()-jg_time0)/1e9 < 180)
           #Seleciona problema  ##########################################
           # ind_prob = #ind do problema selecionado
           ind_prob = 1
